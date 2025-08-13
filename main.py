@@ -3,7 +3,7 @@ from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "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")
 MODEL_NAME = os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini")
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",")]
 
@@ -33,24 +33,34 @@ async def analyze_image_bytes(client: httpx.AsyncClient, image_bytes: bytes):
             {
                 "role": "user",
                 "content": [
-                    {"type": "input_text", "text": "Analyze this photo and respond with the JSON."},
-                    {"type": "input_image", "image_url": f"data:image/jpeg;base64,{b64}"},
+                    {"type": "text", "text": "Analyze this photo and respond with the JSON."},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"}
+                    },
                 ],
             },
         ],
         "temperature": 0.2,
     }
+
     r = await client.post(
         "https://api.openai.com/v1/chat/completions",
         headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
         json=payload,
         timeout=60.0,
     )
-    r.raise_for_status()
+
+    if r.status_code >= 400:
+        return {
+            "status": "YELLOW",
+            "description": f"OpenAI API error {r.status_code}: {r.text[:500]}",
+            "recommendation": "Check that OPENAI_VISION_MODEL is set to a vision-capable model (e.g. gpt-4o-mini) and API key is valid."
+        }
+
     data = r.json()
     text = data["choices"][0]["message"]["content"]
 
-    # Try to extract JSON block
     try:
         start = text.find("{")
         end = text.rfind("}")
@@ -73,7 +83,11 @@ async def analyze_image_bytes(client: httpx.AsyncClient, image_bytes: bytes):
         }
 
 @app.post("/api/health")
-async def health():
+async def health_post():
+    return {"ok": True, "model": MODEL_NAME}
+
+@app.get("/api/health")
+async def health_get():
     return {"ok": True, "model": MODEL_NAME}
 
 @app.post("/api/analyze")
